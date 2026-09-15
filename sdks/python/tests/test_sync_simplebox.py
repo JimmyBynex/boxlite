@@ -205,6 +205,8 @@ class TestSyncSimpleBoxGit:
             assert global_email.exit_code == 0, global_email.stderr
             assert local.stdout.strip() == "local@boxlite.ai"
             assert global_email.stdout.strip() == "bot@boxlite.ai"
+            assert box.git.get_config("user.email", scope="local", path="/tmp/repo") == "local@boxlite.ai"
+            assert box.git.get_config("user.email") == "bot@boxlite.ai"
 
     def test_get_config_reads_guest(self, shared_sync_runtime):
         with SyncSimpleBox(image="alpine:latest", runtime=shared_sync_runtime) as box:

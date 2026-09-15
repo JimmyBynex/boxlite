@@ -99,6 +99,8 @@ async def test_git_local_config_does_not_change_global(shared_runtime):
         assert global_email.exit_code == 0, global_email.stderr
         assert local.stdout.strip() == "local@boxlite.ai"
         assert global_email.stdout.strip() == "bot@boxlite.ai"
+        assert await box.git.get_config("user.email", scope="local", path="/tmp/repo") == "local@boxlite.ai"
+        assert await box.git.get_config("user.email") == "bot@boxlite.ai"
 
 
 async def test_git_get_config_reads_guest(shared_runtime):

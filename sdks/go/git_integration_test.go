@@ -22,6 +22,7 @@ import (
 //     GitHandle::get_config -> git config --get
 //   - SetConfig local: Git.SetConfig(scope=local, path) -> working_dir ->
 //     git config --local
+//   - GetConfig local: Git.GetConfig(scope=local, path) -> git config --get
 //   - Missing path:  Git.SetConfig(scope=local) -> InvalidArgument (no guest exec)
 func TestIntegrationGitConfig(t *testing.T) {
 	rt := newTestRuntime(t)
@@ -120,9 +121,26 @@ func TestIntegrationGitConfig(t *testing.T) {
 		if localEmail != "local@boxlite.ai" {
 			t.Fatalf("local user.email did not reach guest: want local@boxlite.ai, got %q", localEmail)
 		}
+		gotLocal, err := git.GetConfig(ctx, "user.email", &GitConfigOptions{
+			Scope: "local",
+			Path:  "/tmp/repo",
+		})
+		if err != nil {
+			t.Fatalf("GetConfig local: %v", err)
+		}
+		if gotLocal != "local@boxlite.ai" {
+			t.Fatalf("GetConfig local = %q, want local@boxlite.ai", gotLocal)
+		}
 		globalEmail := guestStdout(t, box, "git config --global --get user.email"+drainPad)
 		if globalEmail != "bot@boxlite.ai" {
 			t.Fatalf("global user.email changed: want bot@boxlite.ai, got %q", globalEmail)
+		}
+		gotGlobal, err := git.GetConfig(ctx, "user.email", nil)
+		if err != nil {
+			t.Fatalf("GetConfig global: %v", err)
+		}
+		if gotGlobal != "bot@boxlite.ai" {
+			t.Fatalf("GetConfig global = %q, want bot@boxlite.ai", gotGlobal)
 		}
 	})
 }

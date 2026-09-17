@@ -147,9 +147,7 @@ class TestSyncSimpleBoxGit:
             with pytest.raises(RuntimeError, match="path"):
                 box.git.get_config("user.email", scope="local")
             with pytest.raises(RuntimeError, match="path"):
-                box.git.configure_user(
-                    "BoxLite Bot", "bot@boxlite.ai", scope="local"
-                )
+                box.git.configure_user("BoxLite Bot", "bot@boxlite.ai", scope="local")
             with pytest.raises(RuntimeError, match="global"):
                 box.git.set_config("user.email", "x@boxlite.ai", scope="file")
             with pytest.raises(RuntimeError, match="global"):
@@ -205,7 +203,10 @@ class TestSyncSimpleBoxGit:
             assert global_email.exit_code == 0, global_email.stderr
             assert local.stdout.strip() == "local@boxlite.ai"
             assert global_email.stdout.strip() == "bot@boxlite.ai"
-            assert box.git.get_config("user.email", scope="local", path="/tmp/repo") == "local@boxlite.ai"
+            assert (
+                box.git.get_config("user.email", scope="local", path="/tmp/repo")
+                == "local@boxlite.ai"
+            )
             assert box.git.get_config("user.email") == "bot@boxlite.ai"
 
     def test_get_config_reads_guest(self, shared_sync_runtime):

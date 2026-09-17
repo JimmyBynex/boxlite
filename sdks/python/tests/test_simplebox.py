@@ -38,9 +38,7 @@ async def test_git_rejects_invalid_config_args(shared_runtime):
         with pytest.raises(RuntimeError, match="path"):
             await box.git.get_config("user.email", scope="local")
         with pytest.raises(RuntimeError, match="path"):
-            await box.git.configure_user(
-                "BoxLite Bot", "bot@boxlite.ai", scope="local"
-            )
+            await box.git.configure_user("BoxLite Bot", "bot@boxlite.ai", scope="local")
         with pytest.raises(RuntimeError, match="global"):
             await box.git.set_config("user.email", "x@boxlite.ai", scope="file")
         with pytest.raises(RuntimeError, match="global"):
@@ -94,12 +92,17 @@ async def test_git_local_config_does_not_change_global(shared_runtime):
         local = await box.exec(
             "sh", "-c", "git -C /tmp/repo config --local --get user.email"
         )
-        global_email = await box.exec("sh", "-c", "git config --global --get user.email")
+        global_email = await box.exec(
+            "sh", "-c", "git config --global --get user.email"
+        )
         assert local.exit_code == 0, local.stderr
         assert global_email.exit_code == 0, global_email.stderr
         assert local.stdout.strip() == "local@boxlite.ai"
         assert global_email.stdout.strip() == "bot@boxlite.ai"
-        assert await box.git.get_config("user.email", scope="local", path="/tmp/repo") == "local@boxlite.ai"
+        assert (
+            await box.git.get_config("user.email", scope="local", path="/tmp/repo")
+            == "local@boxlite.ai"
+        )
         assert await box.git.get_config("user.email") == "bot@boxlite.ai"
 
 

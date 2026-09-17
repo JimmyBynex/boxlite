@@ -29,7 +29,10 @@ async fn run_stdout(handle: &boxlite::LiteBox, cmd: BoxCommand) -> String {
     }
 
     let result = execution.wait().await.expect("wait failed");
-    assert_eq!(result.exit_code, 0, "command should exit 0; stdout={stdout}");
+    assert_eq!(
+        result.exit_code, 0,
+        "command should exit 0; stdout={stdout}"
+    );
     stdout
 }
 
@@ -172,7 +175,14 @@ async fn git_config_reaches_guest() {
     .expect("set_config local");
     let local_email = run_stdout(
         &tb.handle,
-        BoxCommand::new("git").args(["-C", "/tmp/repo", "config", "--local", "--get", "user.email"]),
+        BoxCommand::new("git").args([
+            "-C",
+            "/tmp/repo",
+            "config",
+            "--local",
+            "--get",
+            "user.email",
+        ]),
     )
     .await;
     assert_eq!(

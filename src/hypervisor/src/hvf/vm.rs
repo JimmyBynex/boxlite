@@ -14,19 +14,17 @@ use crate::{Error, MemoryRegion, Result};
 /// value destroys the VM together with its GIC and memory mappings.
 #[derive(Debug)]
 pub struct HvfVm {
-    // Private, so only `new` can create this value: dropping one destroys the
-    // process's VM.
     memory: Mutex<MemoryMap>,
 }
 
-// `crate::Vm` requires Send + Sync; a raw-pointer field would silently drop both.
+// `crate::Vm` requires Send + Sync.
 const _: () = {
     const fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<HvfVm>();
 };
 
 impl HvfVm {
-    /// Creates the process's VM and its GIC, before any vCPU exists.
+    /// Creates the process's VM and its GIC.
     pub fn new() -> Result<Self> {
         Self::create().map_err(Error::CreateVm)
     }
@@ -40,7 +38,7 @@ impl HvfVm {
         check("hv_vm_config_get_default_ipa_size", code)?;
         let memory = Mutex::new(MemoryMap::new(ipa_bits)?);
 
-        // SAFETY: NULL selects the default configuration (hv_vm.h:29).
+        // SAFETY: NULL selects the default configuration.
         let code = unsafe { ffi::hv_vm_create(ptr::null_mut()) };
         check("hv_vm_create", code)?;
         // Own the VM before anything else can fail: an error below drops `vm`,
@@ -56,10 +54,7 @@ impl HvfVm {
     ///
     /// # Safety
     ///
-    /// HVF accesses the original allocation; range checks cannot guarantee its
-    /// lifetime or synchronize accesses to its bytes. The caller must uphold
-    /// [`crate::Vm::map_memory`]'s backing-memory, aliasing, synchronization
-    /// and lifetime requirements.
+    /// The caller must uphold [`crate::Vm::map_memory`]'s requirements.
     pub unsafe fn map_memory(&self, region: &MemoryRegion) -> Result<()> {
         let install = || {
             // Keep validation, the HVF call and bookkeeping atomic against
@@ -90,11 +85,8 @@ impl HvfVm {
         })
     }
 
-    /// Removes exactly the mapping identified by all three region fields.
-    ///
-    /// HVF unmaps any range without complaint, so a region that does not match
-    /// a mapping fails with `NotFound` before reaching it. A failed removal
-    /// keeps the mapping and its backing-memory requirements.
+    /// Removes the mapping matching all three region fields, or fails with
+    /// `NotFound`. A failed removal keeps the backing-memory requirements.
     pub fn unmap_memory(&self, region: &MemoryRegion) -> Result<()> {
         let remove = || {
             let mut memory = self
@@ -130,11 +122,9 @@ impl Drop for HvfVm {
     fn drop(&mut self) {
         // SAFETY: only `create` builds this value, right after hv_vm_create
         // succeeds, so the process's VM exists and belongs to us.
-        let code = unsafe { ffi::hv_vm_destroy() };
-        // Drop cannot report errors. Destroy fails only while vCPUs still
-        // exist (hv_vm.h:39); the VM then stays alive with its mappings, so
-        // memory backing must still outlive the vCPUs, as `crate::Vm::map_memory` requires.
-        let _ = code;
+        // Drop cannot report errors; on failure the VM keeps its mappings, so
+        // backing memory must outlive the vCPUs.
+        let _ = unsafe { ffi::hv_vm_destroy() };
     }
 }
 
@@ -154,8 +144,7 @@ fn query_gic_layout() -> io::Result<GicLayout> {
     gic_layout(dist_size, dist_align, redist_size, redist_align)
 }
 
-/// Creates the GIC at `layout`, after the VM and before any vCPU
-/// (hv_gic.h:35-38).
+/// Creates the GIC at `layout`.
 fn create_gic(layout: &GicLayout) -> io::Result<()> {
     // Released when this function returns, on success or error; the GIC
     // keeps working after release.
@@ -171,12 +160,11 @@ fn create_gic(layout: &GicLayout) -> io::Result<()> {
     check("hv_gic_create", code)
 }
 
-/// Owns a GIC config object until `os_release`.
 struct GicConfig(ffi::hv_gic_config_t);
 
 impl GicConfig {
     fn new() -> io::Result<Self> {
-        // SAFETY: called after hv_vm_create, as hv_gic_config.h:24 requires.
+        // SAFETY: called after hv_vm_create.
         let config = unsafe { ffi::hv_gic_config_create() };
         if config.is_null() {
             return Err(io::Error::new(
@@ -235,7 +223,6 @@ fn gic_layout(
     }
 }
 
-/// Converts an HVF return code, keeping the failed call and the raw code.
 fn check(call: &'static str, code: ffi::hv_return_t) -> io::Result<()> {
     let kind = match code {
         ffi::HV_SUCCESS => return Ok(()),

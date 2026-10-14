@@ -53,7 +53,6 @@ impl MemoryMap {
         })
     }
 
-    /// Validates `region`, calls `install` and records the mapping only if it succeeds.
     pub(super) fn map(
         &mut self,
         region: &MemoryRegion,
@@ -61,8 +60,7 @@ impl MemoryMap {
     ) -> io::Result<()> {
         let mapping = Mapping::from(region);
         let end = self.validate(mapping)?;
-        // Half-open ranges let adjacent regions meet without overlapping. HVF
-        // also rejects overlaps, but only with a generic HV_ERROR.
+        // HVF also rejects overlaps, but only with a generic HV_ERROR.
         if self.mappings.iter().any(|existing| {
             mapping.guest_addr < existing.guest_addr + existing.size && existing.guest_addr < end
         }) {
@@ -76,8 +74,6 @@ impl MemoryMap {
         Ok(())
     }
 
-    /// Finds the mapping equal to `region` in all three fields, calls `remove`
-    /// and forgets the mapping only if it succeeds.
     pub(super) fn unmap(
         &mut self,
         region: &MemoryRegion,
@@ -165,7 +161,6 @@ mod tests {
             let result = memory.map(&invalid, |_| unreachable!());
             assert_eq!(kind(result), io::ErrorKind::InvalidInput);
         }
-        // The last page below the IPA limit still fits.
         memory
             .map(&region((1 << 36) - PAGE_SIZE), |_| Ok(()))
             .unwrap();

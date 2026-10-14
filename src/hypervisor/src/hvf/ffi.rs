@@ -20,6 +20,11 @@ pub(super) type hv_ipa_t = u64;
 pub(super) type hv_vm_config_t = *mut c_void;
 /// `hv_gic_types.h:25`: opaque OS object, released with `os_release`.
 pub(super) type hv_gic_config_t = *mut c_void;
+/// `hv_vm_types.h:37`, with the arm64 values from `hv_kern_types.h:70-73`.
+pub(super) type hv_memory_flags_t = u64;
+pub(super) const HV_MEMORY_READ: hv_memory_flags_t = 1 << 0;
+pub(super) const HV_MEMORY_WRITE: hv_memory_flags_t = 1 << 1;
+pub(super) const HV_MEMORY_EXEC: hv_memory_flags_t = 1 << 2;
 
 // `hv_kern_types.h:50-60`. The codes exceed `i32::MAX`, so they wrap as in C.
 pub(super) const HV_SUCCESS: hv_return_t = 0;
@@ -35,6 +40,23 @@ unsafe extern "C" {
     pub(super) fn hv_vm_create(config: hv_vm_config_t) -> hv_return_t;
     /// `hv_vm.h:42`. Fails while any vCPU exists (`hv_vm.h:39`).
     pub(super) fn hv_vm_destroy() -> hv_return_t;
+    /// `hv_vm_config.h:45`: the IPA size `hv_vm_create(NULL)` uses.
+    pub(super) fn hv_vm_config_get_default_ipa_size(bits: *mut u32) -> hv_return_t;
+    /// `hv_vm.h:53`. Page-aligned addresses and size (`hv_vm.h:46-49`).
+    pub(super) fn hv_vm_map(
+        addr: *mut c_void,
+        ipa: hv_ipa_t,
+        size: usize,
+        flags: hv_memory_flags_t,
+    ) -> hv_return_t;
+    /// `hv_vm.h:62`. Succeeds even for ranges that were never mapped.
+    pub(super) fn hv_vm_unmap(ipa: hv_ipa_t, size: usize) -> hv_return_t;
+    /// `hv_vm_allocate.h:51`: page-aligned anonymous memory for guest RAM.
+    #[cfg(test)]
+    pub(super) fn hv_vm_allocate(addr: *mut *mut c_void, size: usize, flags: u64) -> hv_return_t;
+    /// `hv_vm_allocate.h:60`
+    #[cfg(test)]
+    pub(super) fn hv_vm_deallocate(addr: *mut c_void, size: usize) -> hv_return_t;
 
     // C `size_t` is Rust `usize`.
     /// `hv_gic_parameters.h:26`

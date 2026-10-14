@@ -95,10 +95,32 @@ which rejects lines outside HVF's SPI range. HVF return codes become
 `Unsupported`, `HV_BUSY` is `ResourceBusy`), and the message names the failed
 call and its hex code.
 
+`HvfVm::map_memory` maps 16 KiB-aligned host memory read/write/execute, below
+the default IPA size, and rejects overlaps with `AlreadyExists` before HVF sees
+them. `hv_vm_unmap` reports success for any range, mapped or not, so
+`unmap_memory` removes only a recorded mapping matching guest address, size and
+host pointer, and fails with `NotFound` otherwise. Records change only after
+HVF accepts the call, so a failed unmap keeps the backing requirements.
+
 HVF hardware tests need a test binary signed with the
-`com.apple.security.hypervisor` entitlement, and run serially because HVF
-allows one VM per process: `cargo test -p boxlite-hypervisor -- --ignored
---test-threads=1`. No make target signs the binary yet.
+`com.apple.security.hypervisor` entitlement; unsigned, `hv_vm_create` returns
+`HV_DENIED`. They run serially because HVF allows one VM per process. No make
+target signs the binary yet, so on macOS arm64:
+
+```sh
+# 1. An ad-hoc entitlement file.
+cat > /tmp/hvf.entitlements <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>com.apple.security.hypervisor</key><true/></dict></plist>
+EOF
+# 2. Build the test binary and find its path.
+bin=$(cargo test -p boxlite-hypervisor --lib --no-run --message-format=json |
+  jq -r 'select(.profile.test and .target.name == "boxlite_hypervisor") | .executable')
+# 3. Sign it, then run only the HVF hardware tests.
+codesign --sign - --entitlements /tmp/hvf.entitlements --force "$bin"
+"$bin" --ignored --test-threads=1 hvf::
+```
 
 M1 proceeds in boot order: create the VM and map RAM, create/run vCPUs, load
 the kernel and boot metadata, attach legacy devices, then reach a test `/init`

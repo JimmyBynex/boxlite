@@ -1,19 +1,22 @@
 // Copyright 2026 BoxLite Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{io, ptr};
+use std::{io, ptr, sync::Mutex};
 
 use super::ffi;
-use crate::{Error, Result};
+use super::memory::MemoryMap;
+use crate::{Error, MemoryRegion, Result};
 
 /// An arm64 HVF VM with an in-kernel GICv3.
 ///
-/// HVF allows one VM per process. Dropping this value destroys the VM together
-/// with its GIC and memory mappings.
+/// HVF allows one VM per process. Memory backing remains owned by the caller,
+/// under the same lifetime contract as [`crate::Vm::map_memory`]. Dropping this
+/// value destroys the VM together with its GIC and memory mappings.
 #[derive(Debug)]
 pub struct HvfVm {
-    // Only `new` may create this value: dropping one destroys the process's VM.
-    _private: (),
+    // Private, so only `new` can create this value: dropping one destroys the
+    // process's VM.
+    memory: Mutex<MemoryMap>,
 }
 
 // `crate::Vm` requires Send + Sync; a raw-pointer field would silently drop both.
@@ -31,16 +34,85 @@ impl HvfVm {
     fn create() -> io::Result<Self> {
         // Needs no VM, so a host whose GIC does not fit fails before one exists.
         let layout = query_gic_layout()?;
+        let mut ipa_bits = 0;
+        // SAFETY: HVF writes one u32 through a pointer to a live local.
+        let code = unsafe { ffi::hv_vm_config_get_default_ipa_size(&mut ipa_bits) };
+        check("hv_vm_config_get_default_ipa_size", code)?;
+        let memory = Mutex::new(MemoryMap::new(ipa_bits)?);
 
         // SAFETY: NULL selects the default configuration (hv_vm.h:29).
         let code = unsafe { ffi::hv_vm_create(ptr::null_mut()) };
         check("hv_vm_create", code)?;
         // Own the VM before anything else can fail: an error below drops `vm`,
         // and its Drop destroys the VM.
-        let vm = Self { _private: () };
+        let vm = Self { memory };
 
         create_gic(&layout)?;
         Ok(vm)
+    }
+
+    /// Maps caller-owned host memory into the guest, readable, writable and
+    /// executable.
+    ///
+    /// # Safety
+    ///
+    /// HVF accesses the original allocation; range checks cannot guarantee its
+    /// lifetime or synchronize accesses to its bytes. The caller must uphold
+    /// [`crate::Vm::map_memory`]'s backing-memory, aliasing, synchronization
+    /// and lifetime requirements.
+    pub unsafe fn map_memory(&self, region: &MemoryRegion) -> Result<()> {
+        let install = || {
+            // Keep validation, the HVF call and bookkeeping atomic against
+            // other map/unmap calls; this does not protect guest RAM.
+            let mut memory = self
+                .memory
+                .lock()
+                .map_err(|_| io::Error::other("HVF memory map lock is poisoned"))?;
+            memory.map(region, |mapping| {
+                let flags = ffi::HV_MEMORY_READ | ffi::HV_MEMORY_WRITE | ffi::HV_MEMORY_EXEC;
+                // SAFETY: the caller guarantees the backing memory; MemoryMap
+                // checked alignment, overflow, the IPA size and overlaps.
+                let code = unsafe {
+                    ffi::hv_vm_map(
+                        region.host_addr.as_ptr().cast(),
+                        mapping.guest_addr,
+                        region.size,
+                        flags,
+                    )
+                };
+                check("hv_vm_map", code)
+            })
+        };
+        install().map_err(|source| Error::MapMemory {
+            guest_addr: region.guest_addr,
+            size: region.size,
+            source,
+        })
+    }
+
+    /// Removes exactly the mapping identified by all three region fields.
+    ///
+    /// HVF unmaps any range without complaint, so a region that does not match
+    /// a mapping fails with `NotFound` before reaching it. A failed removal
+    /// keeps the mapping and its backing-memory requirements.
+    pub fn unmap_memory(&self, region: &MemoryRegion) -> Result<()> {
+        let remove = || {
+            let mut memory = self
+                .memory
+                .lock()
+                .map_err(|_| io::Error::other("HVF memory map lock is poisoned"))?;
+            memory.unmap(region, |mapping| {
+                // SAFETY: integer arguments naming a recorded mapping; HVF
+                // does not access host memory to remove it.
+                let code = unsafe { ffi::hv_vm_unmap(mapping.guest_addr, region.size) };
+                check("hv_vm_unmap", code)
+            })
+        };
+        remove().map_err(|source| Error::UnmapMemory {
+            guest_addr: region.guest_addr,
+            size: region.size,
+            source,
+        })
     }
 
     /// Sets SPI `line` on the in-kernel GIC, from any thread.
@@ -183,7 +255,59 @@ fn check(call: &'static str, code: ffi::hv_return_t) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::ptr::NonNull;
+
     use super::*;
+
+    /// Guest RAM from hv_vm_allocate, released on drop.
+    struct Ram(MemoryRegion);
+
+    impl Ram {
+        fn new(guest_addr: u64, size: usize) -> Self {
+            let mut addr = ptr::null_mut();
+            // SAFETY: HVF writes the allocation's address through a pointer to a live local.
+            check("hv_vm_allocate", unsafe {
+                ffi::hv_vm_allocate(&mut addr, size, 0)
+            })
+            .unwrap();
+            let host_addr = NonNull::new(addr.cast()).unwrap();
+            Self(MemoryRegion {
+                guest_addr,
+                host_addr,
+                size,
+            })
+        }
+    }
+
+    impl Drop for Ram {
+        fn drop(&mut self) {
+            // SAFETY: tests drop their VM, and with it every mapping, first.
+            unsafe { ffi::hv_vm_deallocate(self.0.host_addr.as_ptr().cast(), self.0.size) };
+        }
+    }
+
+    #[test]
+    #[ignore = "requires Hypervisor.framework and the hypervisor entitlement"]
+    fn mapped_ram_unmaps_only_with_its_exact_range() {
+        // Declared before `vm`, so the VM and its mappings go first.
+        let ram = Ram::new(0x8000_0000, 32 * KIB);
+        let vm = HvfVm::new().unwrap();
+        // SAFETY: `ram` outlives `vm`, and nothing else touches it.
+        unsafe { vm.map_memory(&ram.0) }.unwrap();
+        // HVF would report success for this partial range; BoxLite must not.
+        let half = MemoryRegion {
+            size: 16 * KIB,
+            ..ram.0
+        };
+        assert!(matches!(
+            vm.unmap_memory(&half),
+            Err(Error::UnmapMemory { source, .. }) if source.kind() == io::ErrorKind::NotFound
+        ));
+        vm.unmap_memory(&ram.0).unwrap();
+        // HVF rejects overlapping maps, so remapping proves the unmap reached it.
+        // SAFETY: as above.
+        unsafe { vm.map_memory(&ram.0) }.unwrap();
+    }
 
     const KIB: usize = 1024;
 

@@ -4,6 +4,7 @@
 //! Hypervisor.framework operations on macOS arm64.
 
 mod ffi;
+mod memory;
 mod syndrome;
 mod vm;
 

@@ -19,7 +19,7 @@ machine layout and device emulation belong to `boxlite-vmm`.
 | `exit` | `VcpuExit`: decoded exits and the I/O completion contract |
 | `memory` | `MemoryRegion`: host memory mapped into the guest |
 | `error` | `Error`: the failed operation, its resource, and the host cause |
-| `hvf` / `hvf::syndrome` | HVF operations and ARM exception decoding (not implemented yet) |
+| `hvf` / `hvf::syndrome` | HVF VM and GIC creation and interrupt lines; ARM exception decoding (not implemented yet) |
 | `kvm` | x86_64 VM creation, memory slots, registers, CPUID/MSRs, execution, kicks and pending-I/O completion; arm64 follows |
 | `whp` / `whp::emulator` | WHP operations and x86 instruction decoding for memory-access exits (reserved for M10) |
 
@@ -80,6 +80,25 @@ the public facade; hardware tests also read back the public register configurati
 through KVM to verify long-mode segments, entry addresses, and floating-point state.
 Linux x64 CI runs these tests with `make coverage:vmm:kvm`, adding their coverage
 to the unit profiles before upload; missing KVM access is a failure.
+
+macOS arm64 exports `HvfVm`. `HvfVm::new()` creates the process's only VM
+and an in-kernel GICv3 before any vCPU. The distributor sits at `0x3FFF_0000`
+and the redistributor region ends there. HVF sizes that region for every vCPU it
+supports, not per guest vCPU, so its base comes from
+`hv_gic_get_redistributor_region_size`. A host whose GIC does not fit fails
+with `Unsupported` before any VM exists.
+
+Dropping `HvfVm` destroys the VM with its GIC and mappings; a failed `new`
+never destroys another VM. `set_irq_line` passes the SPI to `hv_gic_set_spi`,
+which rejects lines outside HVF's SPI range. HVF return codes become
+`io::ErrorKind`s (`HV_DENIED` is `PermissionDenied`, `HV_UNSUPPORTED` is
+`Unsupported`, `HV_BUSY` is `ResourceBusy`), and the message names the failed
+call and its hex code.
+
+HVF hardware tests need a test binary signed with the
+`com.apple.security.hypervisor` entitlement, and run serially because HVF
+allows one VM per process: `cargo test -p boxlite-hypervisor -- --ignored
+--test-threads=1`. No make target signs the binary yet.
 
 M1 proceeds in boot order: create the VM and map RAM, create/run vCPUs, load
 the kernel and boot metadata, attach legacy devices, then reach a test `/init`

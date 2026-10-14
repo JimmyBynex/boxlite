@@ -270,7 +270,7 @@ keeps RAM at `0x8000_0000` as libkrun does today.
 
 | Address | Use | Precedent |
 | --- | --- | --- |
-| below `0x3FFF_0000` | GICv3 redistributors, 128 KiB per vCPU | Firecracker, crosvm, dragonball |
+| below `0x3FFF_0000` | GICv3 redistributors, ending at the distributor. KVM VMMs reserve 128 KiB per vCPU; HVF reports one region for every vCPU it supports (`hv_gic_get_redistributor_region_size`, 32 MiB on an M5) | Firecracker, crosvm, dragonball |
 | `0x3FFF_0000` | GICv3 distributor, 64 KiB | Firecracker, crosvm, dragonball |
 | `0x4000_1000` | PL031 RTC, SPI INTID 33 | Firecracker |
 | `0x4000_2000` | PL011 UART, SPI INTID 32 | Firecracker's serial slot |

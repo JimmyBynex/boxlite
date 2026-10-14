@@ -304,7 +304,7 @@ sequenceDiagram
 flowchart LR
   subgraph guest_map["VM · guest physical addresses, low to high"]
     direction LR
-    redistributors["GIC redistributors<br/>below 0x3FFF_0000 · 128 KiB per vCPU"]
+    redistributors["GIC redistributors<br/>below 0x3FFF_0000 · size set by the host"]
     distributor["GIC distributor<br/>0x3FFF_0000 · 64 KiB"]
     rtc["PL031 real-time clock<br/>0x4000_1000 · SPI 33"]
     uart["PL011 serial port<br/>0x4000_2000 · SPI 32"]

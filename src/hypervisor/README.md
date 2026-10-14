@@ -102,25 +102,12 @@ them. `hv_vm_unmap` reports success for any range, mapped or not, so
 host pointer, and fails with `NotFound` otherwise. Records change only after
 HVF accepts the call, so a failed unmap keeps the backing requirements.
 
-HVF hardware tests need a test binary signed with the
-`com.apple.security.hypervisor` entitlement; unsigned, `hv_vm_create` returns
-`HV_DENIED`. They run serially because HVF allows one VM per process. No make
-target signs the binary yet, so on macOS arm64:
-
-```sh
-# 1. An ad-hoc entitlement file.
-cat > /tmp/hvf.entitlements <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>com.apple.security.hypervisor</key><true/></dict></plist>
-EOF
-# 2. Build the test binary and find its path.
-bin=$(cargo test -p boxlite-hypervisor --lib --no-run --message-format=json |
-  jq -r 'select(.profile.test and .target.name == "boxlite_hypervisor") | .executable')
-# 3. Sign it, then run only the HVF hardware tests.
-codesign --sign - --entitlements /tmp/hvf.entitlements --force "$bin"
-"$bin" --ignored --test-threads=1 hvf::
-```
+On macOS arm64, `make test:integration:vmm:hvf` runs the HVF hardware tests.
+HVF returns `HV_DENIED` to an unsigned process, so the target first signs the
+test binary with `scripts/build/sign.sh`, as the shim is signed. The tests need
+only `com.apple.security.hypervisor`; the script also grants
+`com.apple.security.cs.disable-library-validation`. The tests run serially because HVF allows one VM per process. The target needs
+`jq` to find the test binary. CI does not run these tests yet.
 
 M1 proceeds in boot order: create the VM and map RAM, create/run vCPUs, load
 the kernel and boot metadata, attach legacy devices, then reach a test `/init`

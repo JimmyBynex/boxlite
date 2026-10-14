@@ -1,5 +1,5 @@
 PHONY_TARGETS += test test\:unit\:cli test\:unit\:vmm test\:unit\:guest test\:guest-perms test\:guest-artifacts test\:perf\:import-export _ensure-infra-deps test\:apps\:infra test\:apps\:infra-config test\:skill\:boxlite-diagrams
-PHONY_TARGETS += test\:integration\:vmm\:kvm _ensure-kvm test\:vmm\:boot
+PHONY_TARGETS += test\:integration\:vmm\:kvm _ensure-kvm test\:integration\:vmm\:hvf _ensure-hvf test\:vmm\:boot
 
 # Mirrors GitHub Actions strategy.fail-fast. Default false: aggregator
 # targets run every sub-suite even if an earlier one fails, then exit
@@ -281,6 +281,18 @@ _ensure-kvm:
 test\:integration\:vmm\:kvm: _ensure-kvm
 	@cargo test -p boxlite-hypervisor --lib --no-run
 	@timeout 60s cargo test -p boxlite-hypervisor --lib kvm::vm::tests:: -- --ignored --test-threads=1
+
+_ensure-hvf:
+	@test "$$(uname -s -m)" = "Darwin arm64" || { echo "macOS arm64 is required" >&2; exit 1; }
+	@command -v jq >/dev/null || { echo "jq is required to locate the test binary" >&2; exit 1; }
+
+# HVF denies an unsigned process (HV_DENIED), so sign the test binary with the
+# shim's hypervisor entitlement before running the ignored hardware tests.
+test\:integration\:vmm\:hvf: _ensure-hvf
+	@artifacts=$$(cargo test -p boxlite-hypervisor --lib --no-run --message-format=json) || exit $$?; \
+	bin=$$(jq -r 'select(.profile.test and .target.name == "boxlite_hypervisor") | .executable' <<<"$$artifacts"); \
+	test -x "$$bin" || { echo "Could not locate the boxlite-hypervisor test binary" >&2; exit 1; }; \
+	bash "$(SCRIPT_DIR)/build/sign.sh" "$$bin" && "$$bin" --ignored --test-threads=1 hvf::
 
 # Guest crate unit tests. Linux-only (the crate does not build elsewhere) and
 # excluded from test:unit:rust because the zygote suite forks real processes.
